@@ -17,6 +17,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import abc
 import copy
 import sys
 import traceback
@@ -508,3 +509,23 @@ def deserialize_msg(msg):
     raw_msg = jsonutils.loads(msg[_MESSAGE_KEY])
 
     return raw_msg
+
+class Serializer:
+    __metaclass__ = abc.ABCMeta
+
+    @abc.abstractmethod
+    def serialize_entity(self, context, entity):
+        pass
+
+    @abc.abstractmethod
+    def deserialize_entity(self, context, entity):
+        pass
+
+class NoOpSerializer(object):
+    def serialize_entity(self, context, entity):
+        return entity
+
+    def deserialize_entity(self, context, entity):
+        return entity
+
+Serializer.register(NoOpSerializer)

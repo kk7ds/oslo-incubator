@@ -23,6 +23,7 @@ For more information about rpc API version numbers, see:
 
 
 from openstack.common import rpc
+from openstack.common.rpc import common as rpc_common
 
 
 class RpcProxy(object):
@@ -34,7 +35,7 @@ class RpcProxy(object):
     rpc API.
     """
 
-    def __init__(self, topic, default_version):
+    def __init__(self, topic, default_version, serializer=None):
         """Initialize an RpcProxy.
 
         :param topic: The topic to use for all messages.
@@ -44,6 +45,9 @@ class RpcProxy(object):
         """
         self.topic = topic
         self.default_version = default_version
+        if serializer is None:
+            serializer = rpc_common.NoOpSerializer()
+        self.serializer = serializer
         super(RpcProxy, self).__init__()
 
     def _set_version(self, msg, vers):
@@ -66,6 +70,21 @@ class RpcProxy(object):
     def make_msg(method, **kwargs):
         return RpcProxy.make_namespaced_msg(method, None, **kwargs)
 
+    def _serialize_msg_args(self, context, kwargs):
+        """Helper method called to serialize message arguments.
+
+        This calls our serializer on each argument, returning a new
+        set of args that have been serialized.
+
+        :param kwargs: The arguments to serialize
+        :returns: A new set of serialized arguments
+        """
+        new_kwargs = dict()
+        for argname, arg in kwargs.iteritems():
+            new_kwargs[argname] = self.serializer.serialize_entity(context,
+                                                                   arg)
+        return new_kwargs
+
     def call(self, context, msg, topic=None, version=None, timeout=None):
         """rpc.call() a remote method.
 
@@ -81,9 +100,11 @@ class RpcProxy(object):
         :returns: The return value from the remote method.
         """
         self._set_version(msg, version)
+        msg['args'] = self._serialize_msg_args(context, msg['args'])
         real_topic = self._get_topic(topic)
         try:
-            return rpc.call(context, real_topic, msg, timeout)
+            result = rpc.call(context, real_topic, msg, timeout)
+            return self.serializer.deserialize_entity(context, result)
         except rpc.common.Timeout as exc:
             raise rpc.common.Timeout(
                 exc.info, real_topic, msg.get('method'))
@@ -104,9 +125,11 @@ class RpcProxy(object):
                   from the remote method as they arrive.
         """
         self._set_version(msg, version)
+        msg['args'] = self._serialize_msg_args(context, msg['args'])
         real_topic = self._get_topic(topic)
         try:
-            return rpc.multicall(context, real_topic, msg, timeout)
+            result = rpc.multicall(context, real_topic, msg, timeout)
+            return self.serializer.deserialize_entity(context, result)
         except rpc.common.Timeout as exc:
             raise rpc.common.Timeout(
                 exc.info, real_topic, msg.get('method'))
@@ -124,6 +147,7 @@ class RpcProxy(object):
                   remote method.
         """
         self._set_version(msg, version)
+        msg['args'] = self._serialize_msg_args(context, msg['args'])
         rpc.cast(context, self._get_topic(topic), msg)
 
     def fanout_cast(self, context, msg, topic=None, version=None):
@@ -139,6 +163,7 @@ class RpcProxy(object):
                   from the remote method.
         """
         self._set_version(msg, version)
+        msg['args'] = self._serialize_msg_args(context, msg['args'])
         rpc.fanout_cast(context, self._get_topic(topic), msg)
 
     def cast_to_server(self, context, server_params, msg, topic=None,
@@ -157,6 +182,7 @@ class RpcProxy(object):
                   return values.
         """
         self._set_version(msg, version)
+        msg['args'] = self._serialize_msg_args(context, msg['args'])
         rpc.cast_to_server(context, server_params, self._get_topic(topic), msg)
 
     def fanout_cast_to_server(self, context, server_params, msg, topic=None,
@@ -175,5 +201,6 @@ class RpcProxy(object):
                   return values.
         """
         self._set_version(msg, version)
+        msg['args'] = self._serialize_msg_args(context, msg['args'])
         rpc.fanout_cast_to_server(context, server_params,
                                   self._get_topic(topic), msg)
